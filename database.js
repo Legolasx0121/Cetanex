@@ -291,3 +291,77 @@ export function getDashboardSummary() {
     recentObservations,
   };
 }
+
+export function getClientsOverview() {
+  const clients = database
+    .prepare(`
+      SELECT
+        c.id,
+        c.name,
+        c.city,
+        c.country,
+
+        (
+          SELECT COUNT(*)
+          FROM observations o
+          WHERE o.client_id = c.id
+        ) AS observationCount,
+
+        COALESCE(
+          (
+            SELECT SUM(COALESCE(e.quantity, 1))
+            FROM equipment e
+            JOIN observations o ON o.id = e.observation_id
+            WHERE o.client_id = c.id
+          ),
+          0
+        ) AS totalEquipment,
+
+        COALESCE(
+          (
+            SELECT ROUND(AVG(o.confidence))
+            FROM observations o
+            WHERE o.client_id = c.id
+          ),
+          0
+        ) AS averageConfidence,
+
+        (
+          SELECT MAX(o.created_at)
+          FROM observations o
+          WHERE o.client_id = c.id
+        ) AS lastUpdated
+
+      FROM clients c
+      ORDER BY c.name ASC
+    `)
+    .all();
+
+  const equipmentStatement = database.prepare(`
+    SELECT
+      e.id,
+      e.modality,
+      e.quantity,
+      e.brand,
+      e.model,
+      e.age_years AS ageYears,
+      e.status,
+      o.created_at AS observedAt
+    FROM equipment e
+    JOIN observations o ON o.id = e.observation_id
+    WHERE o.client_id = ?
+    ORDER BY e.modality ASC
+  `);
+
+  return clients.map((client) => {
+    const equipment = equipmentStatement.all(client.id);
+
+    return {
+      ...client,
+      renewalOpportunities: equipment
+        .filter((item) => item.ageYears !== null && item.ageYears >= 7)
+        .reduce((total, item) => total + (item.quantity ?? 1), 0),
+      equipment,
+    };
+  });
+}

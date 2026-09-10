@@ -8,6 +8,7 @@ import {
   QWEN3_1_7B_INST_Q4,
 } from "@qvac/sdk";
 import {
+  getClientsOverview,
   getDashboardSummary,
   getObservations,
   saveObservation,
@@ -213,6 +214,26 @@ app.get("/api/dashboard", (_request, response) => {
     response.status(500).json({
       success: false,
       error: "No fue posible generar el dashboard.",
+      details: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+});
+
+app.get("/api/clients", (_request, response) => {
+  try {
+    const clients = getClientsOverview();
+
+    response.json({
+      success: true,
+      total: clients.length,
+      clients,
+    });
+  } catch (error) {
+    console.error("Error consultando clientes:", error);
+
+    response.status(500).json({
+      success: false,
+      error: "No fue posible consultar los clientes.",
       details: error instanceof Error ? error.message : "Error desconocido",
     });
   }

@@ -25,12 +25,14 @@ import {
 } from "recharts";
 import "./App.css";
 import CaptureModal from "./components/CaptureModal";
+import ClientsModal from "./components/ClientsModal";
 import { useDashboard } from "./hooks/useDashboard";
 
 
 
 function App() {
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
+  const [isClientsOpen, setIsClientsOpen] = useState(false);
   const {
     metrics,
     modalityData,
@@ -60,11 +62,17 @@ function App() {
             <MessageSquareText size={19} />
             Capturar observación
           </button>
-          <button className="nav-item">
+          <button
+            className="nav-item"
+            onClick={() => setIsClientsOpen(true)}
+          >
             <Building2 size={19} />
             Clientes
           </button>
-          <button className="nav-item">
+          <button
+            className="nav-item"
+            onClick={() => setIsClientsOpen(true)}
+          >
             <Database size={19} />
             Base instalada
           </button>
@@ -312,6 +320,10 @@ function App() {
           setIsCaptureOpen(false);
           void refreshDashboard();
         }}
+      />
+      <ClientsModal
+        isOpen={isClientsOpen}
+        onClose={() => setIsClientsOpen(false)}
       />
     </div>
   );
