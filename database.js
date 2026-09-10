@@ -51,6 +51,30 @@ database.exec(`
   );
 `);
 
+database.exec(`
+  UPDATE equipment
+  SET modality = 'Tomógrafo'
+  WHERE LOWER(modality) LIKE '%tomograf%';
+
+  UPDATE equipment
+  SET modality = 'Resonador magnético'
+  WHERE LOWER(modality) LIKE '%reson%';
+
+  UPDATE equipment
+  SET modality = 'Ecógrafo'
+  WHERE LOWER(modality) LIKE '%ecograf%'
+     OR LOWER(modality) LIKE '%ultrason%';
+
+  UPDATE equipment
+  SET modality = 'Rayos X'
+  WHERE LOWER(modality) LIKE '%rayos x%'
+     OR LOWER(modality) LIKE '%radiograf%';
+
+  UPDATE equipment
+  SET modality = 'Mamógrafo'
+  WHERE LOWER(modality) LIKE '%mamograf%';
+`);
+
 const findClientStatement = database.prepare(`
   SELECT id
   FROM clients
@@ -201,4 +225,69 @@ export function getObservations() {
     missingFields: JSON.parse(observation.missingFields),
     equipment: equipmentStatement.all(observation.id),
   }));
+}
+
+export function getDashboardSummary() {
+  const metrics = database
+    .prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM clients) AS totalClients,
+        COALESCE(
+          (SELECT SUM(COALESCE(quantity, 1)) FROM equipment),
+          0
+        ) AS totalEquipment,
+        COALESCE(
+          (
+            SELECT SUM(COALESCE(quantity, 1))
+            FROM equipment
+            WHERE age_years >= 7
+          ),
+          0
+        ) AS renewalOpportunities,
+        COALESCE(
+          (SELECT ROUND(AVG(confidence)) FROM observations),
+          0
+        ) AS averageConfidence
+    `)
+    .get();
+
+  const modalities = database
+    .prepare(`
+      SELECT
+        COALESCE(modality, 'Sin clasificar') AS name,
+        SUM(COALESCE(quantity, 1)) AS cantidad
+      FROM equipment
+      GROUP BY modality
+      ORDER BY cantidad DESC
+    `)
+    .all();
+
+  const recentObservations = database
+    .prepare(`
+      SELECT
+        c.name AS hospital,
+        c.city,
+        c.country,
+        COALESCE(e.modality, 'Sin identificar') AS equipment,
+        COALESCE(e.brand, 'Sin identificar') AS brand,
+        CASE
+          WHEN e.age_years IS NOT NULL
+          THEN e.age_years || ' años'
+          ELSE 'Sin confirmar'
+        END AS age,
+        o.confidence,
+        e.status
+      FROM equipment e
+      JOIN observations o ON o.id = e.observation_id
+      JOIN clients c ON c.id = o.client_id
+      ORDER BY o.created_at DESC
+      LIMIT 6
+    `)
+    .all();
+
+  return {
+    metrics,
+    modalities,
+    recentObservations,
+  };
 }

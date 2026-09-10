@@ -8,10 +8,10 @@ import {
   QWEN3_1_7B_INST_Q4,
 } from "@qvac/sdk";
 import {
+  getDashboardSummary,
   getObservations,
   saveObservation,
 } from "./database.js";
-
 
 
 const app = express();
@@ -110,6 +110,34 @@ function extractJSON(text) {
   }
 }
 
+function normalizeModality(modality) {
+  if (!modality) return null;
+
+  const normalized = modality.toLowerCase();
+
+  if (normalized.includes("tomograf")) {
+    return "Tomógrafo";
+  }
+
+  if (normalized.includes("reson")) {
+    return "Resonador magnético";
+  }
+
+  if (normalized.includes("ecograf") || normalized.includes("ultrason")) {
+    return "Ecógrafo";
+  }
+
+  if (normalized.includes("rayos x") || normalized.includes("radiograf")) {
+    return "Rayos X";
+  }
+
+  if (normalized.includes("mamograf")) {
+    return "Mamógrafo";
+  }
+
+  return modality.trim();
+}
+
 function validateAndEnrich(data, observation) {
   if (!data.client) {
     data.client = {
@@ -133,6 +161,11 @@ function validateAndEnrich(data, observation) {
   if (data.client.country === "Panama") {
     data.client.country = "Panamá";
   }
+
+  data.equipment = (data.equipment ?? []).map((equipment) => ({
+    ...equipment,
+    modality: normalizeModality(equipment.modality),
+  }));
 
   return data;
 }
@@ -164,6 +197,25 @@ app.get("/api/health", (_request, response) => {
     inference: modelReady ? "local-ready" : "loading",
     cloudInference: false,
   });
+});
+
+app.get("/api/dashboard", (_request, response) => {
+  try {
+    const dashboard = getDashboardSummary();
+
+    response.json({
+      success: true,
+      dashboard,
+    });
+  } catch (error) {
+    console.error("Error generando el dashboard:", error);
+
+    response.status(500).json({
+      success: false,
+      error: "No fue posible generar el dashboard.",
+      details: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
 });
 
 app.get("/api/observations", (_request, response) => {

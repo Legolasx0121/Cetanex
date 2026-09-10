@@ -25,46 +25,19 @@ import {
 } from "recharts";
 import "./App.css";
 import CaptureModal from "./components/CaptureModal";
+import { useDashboard } from "./hooks/useDashboard";
 
-const modalityData = [
-  { name: "Resonadores", cantidad: 18 },
-  { name: "Tomógrafos", cantidad: 14 },
-  { name: "Ecógrafos", cantidad: 25 },
-  { name: "Rayos X", cantidad: 12 },
-];
 
-const observations = [
-  {
-    hospital: "Hospital DemoCare Pacific",
-    location: "Ciudad de Panamá, Panamá",
-    equipment: "Resonador magnético",
-    brand: "Philips",
-    age: "8 años",
-    confidence: 86,
-    status: "Estimado",
-  },
-  {
-    hospital: "Clínica Santa María",
-    location: "São Paulo, Brasil",
-    equipment: "Tomógrafo",
-    brand: "Siemens",
-    age: "5 años",
-    confidence: 94,
-    status: "Confirmado",
-  },
-  {
-    hospital: "Centro Médico Central",
-    location: "Medellín, Colombia",
-    equipment: "Ecógrafo",
-    brand: "Desconocida",
-    age: "Sin confirmar",
-    confidence: 61,
-    status: "Reportado",
-  },
-];
 
 function App() {
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
+  const {
+    metrics,
+    modalityData,
+    observations,
+    isLoading,
+    refreshDashboard,
+  } = useDashboard();
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -154,8 +127,8 @@ function App() {
             </div>
             <div>
               <span>Clientes registrados</span>
-              <strong>24</strong>
-              <small>+3 este mes</small>
+              <strong>{isLoading ? "—" : metrics.totalClients}</strong>
+              <small>Datos guardados localmente</small>
             </div>
           </article>
 
@@ -165,8 +138,8 @@ function App() {
             </div>
             <div>
               <span>Equipos identificados</span>
-              <strong>69</strong>
-              <small>En 4 países</small>
+              <strong>{isLoading ? "—" : metrics.totalEquipment}</strong>
+              <small>Suma de cantidades registradas</small>
             </div>
           </article>
 
@@ -176,8 +149,8 @@ function App() {
             </div>
             <div>
               <span>Oportunidades de renovación</span>
-              <strong>11</strong>
-              <small>Equipos con más de 7 años</small>
+              <strong>{isLoading ? "—" : metrics.renewalOpportunities}</strong>
+              <small>Equipos con 7 años o más</small>
             </div>
           </article>
 
@@ -187,8 +160,10 @@ function App() {
             </div>
             <div>
               <span>Confianza promedio</span>
-              <strong>87%</strong>
-              <small>+4% desde la última revisión</small>
+              <strong>
+                {isLoading ? "—" : `${metrics.averageConfidence}%`}
+              </strong>
+              <small>Promedio de las observaciones</small>
             </div>
           </article>
         </section>
@@ -333,7 +308,10 @@ function App() {
       </main>
       <CaptureModal
         isOpen={isCaptureOpen}
-        onClose={() => setIsCaptureOpen(false)}
+        onClose={() => {
+          setIsCaptureOpen(false);
+          void refreshDashboard();
+        }}
       />
     </div>
   );
