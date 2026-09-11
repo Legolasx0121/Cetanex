@@ -29,13 +29,14 @@ import ClientsModal from "./components/ClientsModal";
 import AnalyticsModal from "./components/AnalyticsModal";
 import VerificationModal from "./components/VerificationModal";
 import { useDashboard } from "./hooks/useDashboard";
-
+import RegionalMapModal from "./components/RegionalMapModal";
 
 
 function App() {
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
   const [isClientsOpen, setIsClientsOpen] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+  const [isRegionalMapOpen, setIsRegionalMapOpen] = useState(false);
   const [isVerificationOpen, setIsVerificationOpen] =
   useState(false);
   const {
@@ -100,10 +101,13 @@ function App() {
             <Sparkles size={19} />
             Consultar con IA
           </button>
-          <button className="nav-item">
-            <Map size={19} />
-            Mapa regional
-          </button>
+          <button
+  className="nav-item"
+  onClick={() => setIsRegionalMapOpen(true)}
+>
+  <Map size={19} />
+  Mapa regional
+</button>
         </nav>
 
         <div className="privacy-card">
@@ -365,6 +369,11 @@ function App() {
         isOpen={isAnalyticsOpen}
         onClose={() => setIsAnalyticsOpen(false)}
       />
+
+      <RegionalMapModal
+  isOpen={isRegionalMapOpen}
+  onClose={() => setIsRegionalMapOpen(false)}
+/>
 
       <VerificationModal
   isOpen={isVerificationOpen}
