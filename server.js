@@ -314,6 +314,44 @@ function rebuildObservationMetadata(data) {
   return data;
 }
 
+function detectSingleModalityFromObservation(observation) {
+  const normalized = observation
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+
+  if (normalized.includes("tomograf")) {
+    return "Tomógrafo";
+  }
+
+  if (
+    normalized.includes("resonador") ||
+    normalized.includes("resonancia")
+  ) {
+    return "Resonador magnético";
+  }
+
+  if (
+    normalized.includes("ecograf") ||
+    normalized.includes("ultrason")
+  ) {
+    return "Ecógrafo";
+  }
+
+  if (
+    normalized.includes("rayos x") ||
+    normalized.includes("radiograf")
+  ) {
+    return "Rayos X";
+  }
+
+  if (normalized.includes("mamograf")) {
+    return "Mamógrafo";
+  }
+
+  return null;
+}
+
 function validateAndEnrich(data, observation) {
   if (!data.client) {
     data.client = {
@@ -342,6 +380,13 @@ function validateAndEnrich(data, observation) {
   ...equipment,
   modality: normalizeModality(equipment.modality),
 }));
+
+const observedModality =
+  detectSingleModalityFromObservation(observation);
+
+if (data.equipment.length === 1 && observedModality) {
+  data.equipment[0].modality = observedModality;
+}
 
 splitPartiallyDescribedEquipment(data, observation);
 rebuildObservationMetadata(data);
