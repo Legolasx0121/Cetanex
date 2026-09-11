@@ -556,3 +556,152 @@
     justify-self: start;
   }
 }
+
+.installed-equipment-wrapper {
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.installed-equipment-wrapper .installed-equipment {
+  border: 0;
+  border-radius: 0;
+}
+
+.equipment-validation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 13px;
+  border-top: 1px solid #f0f2f5;
+  background: #fafbff;
+}
+
+.equipment-effective-confidence {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #635bff;
+}
+
+.equipment-effective-confidence span,
+.equipment-effective-confidence strong {
+  display: block;
+}
+
+.equipment-effective-confidence span {
+  color: #98a2b3;
+  font-size: 7px;
+}
+
+.equipment-effective-confidence strong {
+  color: #344054;
+  font-size: 10px;
+}
+
+.equipment-effective-confidence small {
+  margin-left: 6px;
+  color: #667085;
+  font-size: 8px;
+}
+
+.confirm-equipment-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid #d8d4ff;
+  border-radius: 9px;
+  color: #5548df;
+  background: #ffffff;
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.confirmation-form {
+  padding: 12px;
+  border-top: 1px solid #e4e7ec;
+  background: #f8f7ff;
+}
+
+.confirmation-form label {
+  display: block;
+  margin-bottom: 7px;
+  color: #475467;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.confirmation-form > div {
+  display: flex;
+  gap: 8px;
+}
+
+.confirmation-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  color: #344054;
+  background: white;
+  outline: none;
+}
+
+.confirmation-form input:focus {
+  border-color: #635bff;
+  box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.12);
+}
+
+.confirmation-form button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 9px;
+  color: white;
+  background: #635bff;
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.confirmation-form small {
+  display: block;
+  margin-top: 7px;
+  color: #98a2b3;
+  font-size: 7px;
+}
+
+.confirmation-success {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid #abefc6;
+  border-radius: 10px;
+  color: #067647;
+  background: #ecfdf3;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .equipment-validation-row,
+  .confirmation-form > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .equipment-effective-confidence small {
+    margin-left: auto;
+  }
+
+  .confirm-equipment-button {
+    justify-content: center;
+  }
+}

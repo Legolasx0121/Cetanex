@@ -7,6 +7,7 @@ import {
   MapPin,
   RefreshCw,
   ShieldCheck,
+  UserCheck,
   X,
 } from "lucide-react";
 import "./ClientsModal.css";
@@ -19,6 +20,10 @@ interface ClientEquipment {
   model: string | null;
   ageYears: number | null;
   status: string;
+  baseConfidence: number;
+confirmationCount: number;
+confidence: number;
+lastConfirmedAt: string | null;
   observedAt: string;
 }
 
@@ -41,6 +46,14 @@ interface ClientsResponse {
   error?: string;
 }
 
+interface ConfirmationResponse {
+  success: boolean;
+  duplicate: boolean;
+  message: string;
+  error?: string;
+  details?: string;
+}
+
 interface ClientsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -54,6 +67,12 @@ export default function ClientsModal({
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [confirmingEquipmentId, setConfirmingEquipmentId] =
+  useState<string | null>(null);
+const [observerName, setObserverName] = useState("");
+const [confirmationMessage, setConfirmationMessage] =
+  useState("");
+const [isConfirming, setIsConfirming] = useState(false);
 
   const loadClients = useCallback(async () => {
     setIsLoading(true);
@@ -93,6 +112,61 @@ export default function ClientsModal({
       void loadClients();
     }
   }, [isOpen, loadClients]);
+
+  async function registerIndependentConfirmation(
+  equipmentId: string,
+) {
+  if (!observerName.trim()) {
+    setError(
+      "Escribe el nombre del colaborador que confirma.",
+    );
+    return;
+  }
+
+  setIsConfirming(true);
+  setError("");
+  setConfirmationMessage("");
+
+  try {
+    const response = await fetch(
+      `http://localhost:3001/api/equipment/${equipmentId}/confirm`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          observerName: observerName.trim(),
+        }),
+      },
+    );
+
+    const payload: ConfirmationResponse =
+      await response.json();
+
+    if (!response.ok || !payload.success) {
+      throw new Error(
+        payload.details ||
+          payload.error ||
+          "No fue posible registrar la confirmación.",
+      );
+    }
+
+    setConfirmationMessage(payload.message);
+    setObserverName("");
+    setConfirmingEquipmentId(null);
+
+    await loadClients();
+  } catch (confirmationError) {
+    setError(
+      confirmationError instanceof Error
+        ? confirmationError.message
+        : "No fue posible registrar la confirmación.",
+    );
+  } finally {
+    setIsConfirming(false);
+  }
+}
 
   if (!isOpen) return null;
 
@@ -259,44 +333,139 @@ export default function ClientsModal({
                 </div>
 
                 <div className="installed-equipment-list">
-                  {selectedClient.equipment.map((equipment) => (
-                    <article
-                      className="installed-equipment"
-                      key={equipment.id}
-                    >
-                      <div className="installed-equipment-main">
-                        <div className="equipment-quantity">
-                          {equipment.quantity}
-                        </div>
+  {confirmationMessage && (
+    <div className="confirmation-success">
+      <UserCheck size={16} />
+      {confirmationMessage}
+    </div>
+  )}
 
-                        <div>
-                          <strong>{equipment.modality}</strong>
-                          <span>
-                            {equipment.brand || "Marca sin identificar"}
-                            {equipment.model
-                              ? ` · ${equipment.model}`
-                              : ""}
-                          </span>
-                        </div>
-                      </div>
+  {selectedClient.equipment.map((equipment) => (
+    <div
+      className="installed-equipment-wrapper"
+      key={equipment.id}
+    >
+      <article className="installed-equipment">
+        <div className="installed-equipment-main">
+          <div className="equipment-quantity">
+            {equipment.quantity}
+          </div>
 
-                      <div className="equipment-age">
-                        <span>Antigüedad</span>
-                        <strong>
-                          {equipment.ageYears !== null
-                            ? `${equipment.ageYears} años`
-                            : "Pendiente"}
-                        </strong>
-                      </div>
+          <div>
+            <strong>{equipment.modality}</strong>
+            <span>
+              {equipment.brand || "Marca sin identificar"}
+              {equipment.model
+                ? ` · ${equipment.model}`
+                : ""}
+            </span>
+          </div>
+        </div>
 
-                      <span
-                        className={`client-equipment-status ${equipment.status.toLowerCase()}`}
-                      >
-                        {equipment.status}
-                      </span>
-                    </article>
-                  ))}
-                </div>
+        <div className="equipment-age">
+          <span>Antigüedad</span>
+          <strong>
+            {equipment.ageYears !== null
+              ? `${equipment.ageYears} años`
+              : "Pendiente"}
+          </strong>
+        </div>
+
+        <span
+          className={`client-equipment-status ${equipment.status.toLowerCase()}`}
+        >
+          {equipment.status}
+        </span>
+      </article>
+
+      <div className="equipment-validation-row">
+        <div className="equipment-effective-confidence">
+          <ShieldCheck size={15} />
+
+          <div>
+            <span>Confianza efectiva</span>
+            <strong>{equipment.confidence}%</strong>
+          </div>
+
+          <small>
+            {equipment.confirmationCount === 0
+              ? "Sin confirmaciones independientes"
+              : `${equipment.confirmationCount} ${
+                  equipment.confirmationCount === 1
+                    ? "confirmación independiente"
+                    : "confirmaciones independientes"
+                }`}
+          </small>
+        </div>
+
+        <button
+          className="confirm-equipment-button"
+          type="button"
+          onClick={() => {
+            setError("");
+            setConfirmationMessage("");
+            setObserverName("");
+            setConfirmingEquipmentId(
+              confirmingEquipmentId === equipment.id
+                ? null
+                : equipment.id,
+            );
+          }}
+        >
+          <UserCheck size={15} />
+          Confirmación independiente
+        </button>
+      </div>
+
+      {confirmingEquipmentId === equipment.id && (
+        <div className="confirmation-form">
+          <label htmlFor={`observer-${equipment.id}`}>
+            Nombre del colaborador que verificó el equipo
+          </label>
+
+          <div>
+            <input
+              id={`observer-${equipment.id}`}
+              value={observerName}
+              onChange={(event) =>
+                setObserverName(event.target.value)
+              }
+              placeholder="Ejemplo: Laura Gómez"
+              disabled={isConfirming}
+            />
+
+            <button
+              type="button"
+              onClick={() =>
+                void registerIndependentConfirmation(
+                  equipment.id,
+                )
+              }
+              disabled={
+                isConfirming || !observerName.trim()
+              }
+            >
+              {isConfirming ? (
+                <LoaderCircle
+                  className="spinner"
+                  size={15}
+                />
+              ) : (
+                <UserCheck size={15} />
+              )}
+              Registrar
+            </button>
+          </div>
+
+          <small>
+            Cada colaborador solo puede confirmar una vez
+            este equipo.
+          </small>
+        </div>
+      )}
+    </div>
+  ))}
+</div>
 
                 {selectedClient.renewalOpportunities > 0 && (
                   <div className="renewal-message">

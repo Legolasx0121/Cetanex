@@ -49,6 +49,15 @@ database.exec(`
     created_at TEXT NOT NULL,
     FOREIGN KEY (observation_id) REFERENCES observations(id)
   );
+
+  CREATE TABLE IF NOT EXISTS equipment_confirmations (
+  id TEXT PRIMARY KEY,
+  equipment_id TEXT NOT NULL,
+  observer_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (equipment_id, observer_name),
+  FOREIGN KEY (equipment_id) REFERENCES equipment(id)
+);
 `);
 
 database.exec(`
@@ -270,18 +279,18 @@ export function getObservations() {
     .all();
 
   const equipmentStatement = database.prepare(`
-    SELECT
-      id,
-      modality,
-      quantity,
-      brand,
-      model,
-      age_years AS ageYears,
-      status
-    FROM equipment
-    WHERE observation_id = ?
-    ORDER BY created_at ASC
-  `);
+  SELECT
+    id,
+    modality,
+    quantity,
+    brand,
+    model,
+    age_years AS ageYears,
+    status
+  FROM equipment
+  WHERE observation_id = ?
+  ORDER BY created_at ASC
+`);
 
   return observations.map((observation) => ({
     ...observation,
@@ -402,20 +411,46 @@ export function getClientsOverview() {
     .all();
 
   const equipmentStatement = database.prepare(`
-    SELECT
-      e.id,
-      e.modality,
-      e.quantity,
-      e.brand,
-      e.model,
-      e.age_years AS ageYears,
-      e.status,
-      o.created_at AS observedAt
-    FROM equipment e
-    JOIN observations o ON o.id = e.observation_id
-    WHERE o.client_id = ?
-    ORDER BY e.modality ASC
-  `);
+  SELECT
+    e.id,
+    e.modality,
+    e.quantity,
+    e.brand,
+    e.model,
+    e.age_years AS ageYears,
+    e.status,
+    o.confidence AS baseConfidence,
+
+    (
+      SELECT COUNT(*)
+      FROM equipment_confirmations confirmation
+      WHERE confirmation.equipment_id = e.id
+    ) AS confirmationCount,
+
+    MIN(
+      100,
+      o.confidence + (
+        (
+          SELECT COUNT(*)
+          FROM equipment_confirmations confirmation
+          WHERE confirmation.equipment_id = e.id
+        ) * 5
+      )
+    ) AS confidence,
+
+    (
+      SELECT MAX(confirmation.created_at)
+      FROM equipment_confirmations confirmation
+      WHERE confirmation.equipment_id = e.id
+    ) AS lastConfirmedAt,
+
+    o.created_at AS observedAt
+
+  FROM equipment e
+  JOIN observations o ON o.id = e.observation_id
+  WHERE o.client_id = ?
+  ORDER BY e.modality ASC
+`);
 
   return clients.map((client) => {
     const equipment = equipmentStatement.all(client.id);
@@ -445,8 +480,26 @@ export function getVerificationAlerts() {
         e.model,
         e.age_years AS ageYears,
         e.status,
-        o.confidence,
-        o.created_at AS observedAt
+        o.confidence AS baseConfidence,
+
+MIN(
+  100,
+  o.confidence + (
+    (
+      SELECT COUNT(*)
+      FROM equipment_confirmations confirmation
+      WHERE confirmation.equipment_id = e.id
+    ) * 5
+  )
+) AS confidence,
+
+(
+  SELECT COUNT(*)
+  FROM equipment_confirmations confirmation
+  WHERE confirmation.equipment_id = e.id
+) AS confirmationCount,
+
+o.created_at AS observedAt
       FROM equipment e
       JOIN observations o ON o.id = e.observation_id
       JOIN clients c ON c.id = o.client_id
@@ -563,4 +616,120 @@ export function getVerificationAlerts() {
         first.daysSinceObserved
       );
     });
+}
+
+export function confirmEquipment(
+  equipmentId,
+  observerName,
+) {
+  const cleanObserverName = String(observerName ?? "").trim();
+
+  if (!cleanObserverName) {
+    throw new Error(
+      "Debes indicar el nombre del colaborador que confirma.",
+    );
+  }
+
+  const equipment = database
+    .prepare(`
+      SELECT
+        e.id,
+        e.status,
+        e.modality,
+        c.name AS clientName
+      FROM equipment e
+      JOIN observations o ON o.id = e.observation_id
+      JOIN clients c ON c.id = o.client_id
+      WHERE e.id = ?
+      LIMIT 1
+    `)
+    .get(equipmentId);
+
+  if (!equipment) {
+    throw new Error("El equipo no existe.");
+  }
+
+  const existingConfirmation = database
+    .prepare(`
+      SELECT id, created_at AS createdAt
+      FROM equipment_confirmations
+      WHERE equipment_id = ?
+        AND LOWER(observer_name) = LOWER(?)
+      LIMIT 1
+    `)
+    .get(equipmentId, cleanObserverName);
+
+  if (existingConfirmation) {
+    const confirmationCount = database
+      .prepare(`
+        SELECT COUNT(*) AS total
+        FROM equipment_confirmations
+        WHERE equipment_id = ?
+      `)
+      .get(equipmentId).total;
+
+    return {
+      duplicate: true,
+      confirmationCount,
+      equipment,
+      existingConfirmation,
+    };
+  }
+
+  const confirmationId = randomUUID();
+  const createdAt = new Date().toISOString();
+
+  database.exec("BEGIN TRANSACTION");
+
+  try {
+    database
+      .prepare(`
+        INSERT INTO equipment_confirmations (
+          id,
+          equipment_id,
+          observer_name,
+          created_at
+        )
+        VALUES (?, ?, ?, ?)
+      `)
+      .run(
+        confirmationId,
+        equipmentId,
+        cleanObserverName,
+        createdAt,
+      );
+
+    database
+      .prepare(`
+        UPDATE equipment
+        SET status = 'Confirmado'
+        WHERE id = ?
+      `)
+      .run(equipmentId);
+
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+
+  const confirmationCount = database
+    .prepare(`
+      SELECT COUNT(*) AS total
+      FROM equipment_confirmations
+      WHERE equipment_id = ?
+    `)
+    .get(equipmentId).total;
+
+  return {
+    duplicate: false,
+    confirmationId,
+    confirmationCount,
+    createdAt,
+    observerName: cleanObserverName,
+    equipment: {
+      ...equipment,
+      status: "Confirmado",
+    },
+  };
 }

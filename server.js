@@ -16,6 +16,7 @@ import {
 } from "@qvac/sdk";
 
 import {
+  confirmEquipment,
   getClientsOverview,
   getDashboardSummary,
   getObservations,
@@ -784,6 +785,59 @@ app.get("/api/verification-alerts", (_request, response) => {
     });
   }
 });
+
+app.post(
+  "/api/equipment/:equipmentId/confirm",
+  (request, response) => {
+    try {
+      const equipmentId =
+        request.params.equipmentId?.trim();
+      const observerName =
+        request.body?.observerName?.trim();
+
+      if (!equipmentId || !observerName) {
+        return response.status(400).json({
+          success: false,
+          error:
+            "El equipo y el colaborador son obligatorios.",
+        });
+      }
+
+      const confirmation = confirmEquipment(
+        equipmentId,
+        observerName,
+      );
+
+      response.status(confirmation.duplicate ? 200 : 201).json({
+        success: true,
+        duplicate: confirmation.duplicate,
+        message: confirmation.duplicate
+          ? "Este colaborador ya confirmó el equipo."
+          : "Confirmación independiente registrada.",
+        confirmation,
+      });
+    } catch (error) {
+      console.error(
+        "Error registrando confirmación:",
+        error,
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Error desconocido";
+
+      response
+        .status(message === "El equipo no existe." ? 404 : 500)
+        .json({
+          success: false,
+          error:
+            "No fue posible registrar la confirmación.",
+          details: message,
+        });
+    }
+  },
+);
 
 app.get("/api/observations", (_request, response) => {
   try {
