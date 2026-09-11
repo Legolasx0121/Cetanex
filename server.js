@@ -179,6 +179,133 @@ function validateAndEnrich(data, observation) {
   return data;
 }
 
+function calculateConfidence(data) {
+  const client = data.client ?? {};
+  const equipment = data.equipment ?? [];
+
+  const clientScore =
+    (client.name ? 8 : 0) +
+    (client.city ? 4 : 0) +
+    (client.country ? 3 : 0);
+
+  const equipmentWeights = {
+    modality: 0.25,
+    quantity: 0.15,
+    brand: 0.2,
+    model: 0.2,
+    ageYears: 0.2,
+  };
+
+  const completenessRatios = equipment.map((item) => {
+    let ratio = 0;
+
+    if (item.modality) {
+      ratio += equipmentWeights.modality;
+    }
+
+    if (item.quantity !== null && item.quantity !== undefined) {
+      ratio += equipmentWeights.quantity;
+    }
+
+    if (item.brand) {
+      ratio += equipmentWeights.brand;
+    }
+
+    if (item.model) {
+      ratio += equipmentWeights.model;
+    }
+
+    if (item.ageYears !== null && item.ageYears !== undefined) {
+      ratio += equipmentWeights.ageYears;
+    }
+
+    return ratio;
+  });
+
+  const averageCompleteness =
+    completenessRatios.length > 0
+      ? completenessRatios.reduce(
+          (total, value) => total + value,
+          0,
+        ) / completenessRatios.length
+      : 0;
+
+  const completenessScore = Math.round(
+    averageCompleteness * 45,
+  );
+
+  const evidenceValues = {
+    Confirmado: 1,
+    Reportado: 0.7,
+    Estimado: 0.4,
+    Desconocido: 0.1,
+  };
+
+  const averageEvidence =
+    equipment.length > 0
+      ? equipment.reduce(
+          (total, item) =>
+            total +
+            (evidenceValues[item.status] ??
+              evidenceValues.Desconocido),
+          0,
+        ) / equipment.length
+      : 0;
+
+  const evidenceScore = Math.round(
+    averageEvidence * 25,
+  );
+
+  const followUpScore =
+    data.missingFields?.length > 0
+      ? data.followUpQuestion
+        ? 10
+        : 3
+      : 10;
+
+  const freshnessScore = 5;
+
+  const totalScore = Math.min(
+    100,
+    clientScore +
+      completenessScore +
+      evidenceScore +
+      followUpScore +
+      freshnessScore,
+  );
+
+  return {
+    score: totalScore,
+    factors: [
+      {
+        label: "Identificación del cliente",
+        score: clientScore,
+        maximum: 15,
+      },
+      {
+        label: "Completitud del equipo",
+        score: completenessScore,
+        maximum: 45,
+      },
+      {
+        label: "Calidad de la evidencia",
+        score: evidenceScore,
+        maximum: 25,
+      },
+      {
+        label: "Seguimiento de faltantes",
+        score: followUpScore,
+        maximum: 10,
+      },
+      {
+        label: "Vigencia de la observación",
+        score: freshnessScore,
+        maximum: 5,
+      },
+    ],
+  };
+}
+
 async function initializeQVAC() {
   console.log("Cetanex está cargando QVAC localmente...");
 
@@ -389,6 +516,17 @@ app.post("/api/analyze", async (request, response) => {
         extractedData,
         observation,
       );
+
+    const confidence = calculateConfidence(
+      structuredObservation,
+    );
+
+    structuredObservation.confidence =
+      confidence.score;
+
+    structuredObservation.confidenceBreakdown =
+      confidence.factors;
+
 
     response.json({
       success: true,

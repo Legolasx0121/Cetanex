@@ -33,6 +33,11 @@ interface AnalysisData {
   };
   equipment: Equipment[];
   confidence: number;
+  confidenceBreakdown?: Array<{
+  label: string;
+  score: number;
+  maximum: number;
+}>;
   missingFields: string[];
   followUpQuestion: string | null;
   summary: string;
@@ -354,6 +359,42 @@ export default function CaptureModal({
                     </article>
                   ))}
                 </div>
+
+                {result.confidenceBreakdown && (
+  <div className="confidence-breakdown">
+    <div className="confidence-breakdown-title">
+      <strong>Confianza explicable</strong>
+      <span>{result.confidence}% total</span>
+    </div>
+
+    {result.confidenceBreakdown.map((factor) => {
+      const percentage =
+        (factor.score / factor.maximum) * 100;
+
+      return (
+        <div
+          className="confidence-factor"
+          key={factor.label}
+        >
+          <div>
+            <span>{factor.label}</span>
+            <strong>
+              {factor.score}/{factor.maximum}
+            </strong>
+          </div>
+
+          <div className="factor-progress">
+            <span
+              style={{
+                width: `${percentage}%`,
+              }}
+            />
+          </div>
+        </div>
+      );
+    })}
+  </div>
+)}
 
                 {result.followUpQuestion && (
                   <div className="follow-up-card">
