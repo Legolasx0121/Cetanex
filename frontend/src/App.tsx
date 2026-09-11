@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   Activity,
-  Building2,
   CircleAlert,
   Database,
   Hospital,
@@ -71,13 +70,7 @@ function App() {
   <MessageSquareText size={19} />
   Capturar observación
 </button>
-          <button
-            className="nav-item"
-            onClick={() => setIsClientsOpen(true)}
-          >
-            <Building2 size={19} />
-            Clientes
-          </button>
+          
           <button
             className="nav-item"
             onClick={() => setIsClientsOpen(true)}
