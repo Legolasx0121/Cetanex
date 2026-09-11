@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   BrainCircuit,
   Check,
@@ -6,9 +6,14 @@ import {
   Mic,
   ShieldCheck,
   Sparkles,
+  Square,
   X,
 } from "lucide-react";
 import "./CaptureModal.css";
+import {
+  startWavRecording,
+  type WavRecorder,
+} from "../utils/audioRecorder";
 
 type EquipmentStatus =
   | "Confirmado"
@@ -55,6 +60,14 @@ interface AnalysisResponse {
   details?: string;
 }
 
+interface TranscriptionResponse {
+  success: boolean;
+  processedLocally: boolean;
+  transcript?: string;
+  error?: string;
+  details?: string;
+}
+
 interface CaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -75,8 +88,94 @@ export default function CaptureModal({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [duplicateMessage, setDuplicateMessage] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+const [isTranscribing, setIsTranscribing] = useState(false);
+const recorderRef = useRef<WavRecorder | null>(null);
 
   if (!isOpen) return null;
+
+  async function toggleVoiceRecording() {
+  if (isRecording) {
+    const recorder = recorderRef.current;
+
+    recorderRef.current = null;
+    setIsRecording(false);
+
+    if (!recorder) return;
+
+    setIsTranscribing(true);
+    setError("");
+
+    try {
+      const audioBlob = await recorder.stop();
+
+      const response = await fetch(
+        "http://localhost:3001/api/transcribe",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "audio/wav",
+          },
+          body: audioBlob,
+        },
+      );
+
+      const payload: TranscriptionResponse =
+        await response.json();
+
+      if (!response.ok || !payload.success) {
+        throw new Error(
+          payload.details ||
+            payload.error ||
+            "No fue posible transcribir el audio.",
+        );
+      }
+
+      const transcript = payload.transcript?.trim();
+
+      if (!transcript) {
+        throw new Error(
+          "QVAC no detectó palabras en la grabación.",
+        );
+      }
+
+      setObservation((currentObservation) => {
+        const currentText = currentObservation.trim();
+
+        return currentText
+          ? `${currentText} ${transcript}`
+          : transcript;
+      });
+
+      setResult(null);
+      setSaved(false);
+      setDuplicateMessage("");
+    } catch (transcriptionError) {
+      setError(
+        transcriptionError instanceof Error
+          ? transcriptionError.message
+          : "No fue posible procesar la grabación.",
+      );
+    } finally {
+      setIsTranscribing(false);
+    }
+
+    return;
+  }
+
+  try {
+    setError("");
+
+    const recorder = await startWavRecording();
+
+    recorderRef.current = recorder;
+    setIsRecording(true);
+  } catch {
+    setError(
+      "No fue posible acceder al micrófono. Revisa el permiso del navegador.",
+    );
+  }
+}
 
   async function analyzeObservation() {
     if (!observation.trim()) {
@@ -168,6 +267,15 @@ export default function CaptureModal({
 }
 
   function closeModal() {
+    if (recorderRef.current) {
+  const activeRecorder = recorderRef.current;
+  recorderRef.current = null;
+
+  void activeRecorder.stop().catch(() => {});
+}
+
+setIsRecording(false);
+setIsTranscribing(false);
     setObservation("");
     setResult(null);
     setPerformance(null);
@@ -232,16 +340,46 @@ export default function CaptureModal({
                 onChange={(event) => setObservation(event.target.value)}
                 placeholder="Ejemplo: Estoy en Hospital DemoCare Pacific..."
                 rows={8}
-                disabled={isAnalyzing}
+                disabled={isAnalyzing || isRecording || isTranscribing}
               />
+              {isRecording && (
+  <div className="voice-feedback recording">
+    <span />
+    Grabando en el dispositivo... Presiona el botón para detener.
+  </div>
+)}
+
+{isTranscribing && (
+  <div className="voice-feedback">
+    <LoaderCircle className="spinner" size={15} />
+    Whisper está transcribiendo localmente...
+  </div>
+)}
 
               <button
-                className="voice-button"
-                type="button"
-                title="Dictado por voz: próximamente"
-              >
-                <Mic size={18} />
-              </button>
+  className={`voice-button${isRecording ? " recording" : ""}`}
+  type="button"
+  onClick={toggleVoiceRecording}
+  disabled={isAnalyzing || isTranscribing}
+  title={
+    isRecording
+      ? "Detener grabación"
+      : "Dictar observación"
+  }
+  aria-label={
+    isRecording
+      ? "Detener grabación"
+      : "Iniciar dictado por voz"
+  }
+>
+  {isTranscribing ? (
+    <LoaderCircle className="spinner" size={18} />
+  ) : isRecording ? (
+    <Square size={16} fill="currentColor" />
+  ) : (
+    <Mic size={18} />
+  )}
+</button>
             </div>
 
             <div className="input-actions">

@@ -659,3 +659,55 @@
   border-radius: inherit;
   background: linear-gradient(90deg, #766cff, #48c7a4);
 }
+
+.voice-button.recording {
+  color: #ffffff;
+  background: #ef4444;
+  border-color: #ef4444;
+  animation: voice-pulse 1.3s infinite;
+}
+
+.voice-feedback {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  color: #635bff;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.voice-feedback.recording {
+  color: #dc2626;
+}
+
+.voice-feedback.recording span {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45);
+  animation: recording-dot 1.3s infinite;
+}
+
+@keyframes voice-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.35);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes recording-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}

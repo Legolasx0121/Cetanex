@@ -1,12 +1,18 @@
 import express from "express";
 import cors from "cors";
 import { jsonrepair } from "jsonrepair";
+import { randomUUID } from "node:crypto";
+import { writeFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   loadModel,
   completion,
+  transcribe,
   unloadModel,
   QWEN3_1_7B_INST_Q4,
+  WHISPER_LARGE_V3_TURBO,
 } from "@qvac/sdk";
 
 import {
@@ -29,6 +35,9 @@ app.use(express.json({ limit: "2mb" }));
 
 let modelId = null;
 let modelReady = false;
+
+let transcriptionModelId = null;
+let transcriptionReady = false;
 
 const extractionPrompt = `
 /no_think
@@ -361,16 +370,38 @@ function validateAndEnrich(data, observation) {
     };
   }
 
-  if (!data.client.name) {
-    const clientPattern =
-      /\b((?:Hospital|Clínica|Clinica|Centro Médico|Centro Medico|Instituto)\s+[^,.;]+)/iu;
+  const clientPattern =
+  /\b((?:Hospital|Clínica|Clinica|Centro Médico|Centro Medico|Instituto)\s+[^,.;]+)/iu;
 
-    const clientMatch = observation.match(clientPattern);
+const clientMatch = observation.match(clientPattern);
 
-    if (clientMatch) {
-      data.client.name = clientMatch[1].trim();
+if (clientMatch) {
+  let detectedClientName = clientMatch[1].trim();
+  const city = String(data.client.city ?? "").trim();
+
+  if (city) {
+    const citySuffix = ` en ${city}`;
+
+    if (
+      detectedClientName
+        .toLowerCase()
+        .endsWith(citySuffix.toLowerCase())
+    ) {
+      detectedClientName = detectedClientName
+        .slice(0, -citySuffix.length)
+        .trim();
     }
   }
+
+  const modelIncludedFacilityType =
+    /^(?:Hospital|Clínica|Clinica|Centro Médico|Centro Medico|Instituto)\b/iu.test(
+      String(data.client.name ?? ""),
+    );
+
+  if (!data.client.name || !modelIncludedFacilityType) {
+    data.client.name = detectedClientName;
+  }
+}
 
   if (data.client.country === "Panama") {
     data.client.country = "Panamá";
@@ -523,7 +554,7 @@ function calculateConfidence(data) {
 }
 
 async function initializeQVAC() {
-  console.log("Cetanex está cargando QVAC localmente...");
+  console.log("Cetanex está cargando el modelo de lenguaje local...");
 
   modelId = await loadModel({
     modelSrc: QWEN3_1_7B_INST_Q4,
@@ -535,24 +566,138 @@ async function initializeQVAC() {
     onProgress: (progress) => {
       const percentage = progress.percentage.toFixed(0);
       process.stdout.write(
-        `\rPreparando modelo: ${percentage}%`,
+        `\rPreparando modelo de lenguaje: ${percentage}%`,
       );
     },
   });
 
   modelReady = true;
+  console.log("\nModelo de lenguaje listo.");
 
-  console.log("\nQVAC está listo.");
+  console.log("Cetanex está cargando Whisper local...");
+
+  transcriptionModelId = await loadModel({
+    modelSrc: WHISPER_LARGE_V3_TURBO,
+    modelType: "whisper",
+    modelConfig: {
+      language: "es",
+      translate: false,
+      no_timestamps: true,
+      strategy: "greedy",
+      n_threads: 4,
+      contextParams: {
+        use_gpu: true,
+        flash_attn: true,
+        gpu_device: 0,
+      },
+    },
+    onProgress: (progress) => {
+      const percentage = progress.percentage.toFixed(0);
+      process.stdout.write(
+        `\rPreparando modelo de voz: ${percentage}%`,
+      );
+    },
+  });
+
+  transcriptionReady = true;
+
+  console.log("\nWhisper está listo.");
+  console.log("QVAC está listo para texto y voz.");
 }
 
 app.get("/api/health", (_request, response) => {
   response.json({
-    application: "Cetanex",
-    status: "online",
-    inference: modelReady ? "local-ready" : "loading",
-    cloudInference: false,
-  });
+  application: "Cetanex",
+  status: "online",
+  inference: modelReady ? "local-ready" : "loading",
+  transcription: transcriptionReady
+    ? "local-ready"
+    : "loading",
+  cloudInference: false,
 });
+});
+
+function normalizeMedicalTranscript(transcript) {
+  return transcript
+    .replace(/\b(?:logic|logiq)\s*p\s*9\b/giu, "LOGIQ P9")
+    .replace(/\beco\s*grafo\b/giu, "ecógrafo")
+    .replace(/\btomografo\b/giu, "tomógrafo")
+    .replace(/\bclinica\b/giu, "Clínica")
+    .replace(/\bpanama\b/giu, "Panamá")
+    .trim();
+}
+
+app.post(
+  "/api/transcribe",
+  express.raw({
+    type: "audio/wav",
+    limit: "15mb",
+  }),
+  async (request, response) => {
+    let temporaryAudioPath = null;
+
+    try {
+      if (!transcriptionReady || !transcriptionModelId) {
+        return response.status(503).json({
+          success: false,
+          error: "El modelo local de voz todavía se está preparando.",
+        });
+      }
+
+      if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+        return response.status(400).json({
+          success: false,
+          error: "No se recibió un archivo de audio válido.",
+        });
+      }
+
+      temporaryAudioPath = join(
+        tmpdir(),
+        `cetanex-${randomUUID()}.wav`,
+      );
+
+      await writeFile(temporaryAudioPath, request.body);
+
+      console.log("\nTranscribiendo audio localmente...");
+
+      const transcript = await transcribe({
+        modelId: transcriptionModelId,
+        audioChunk: temporaryAudioPath,
+        prompt:
+          "Transcripción en español de una visita hospitalaria. " +
+          "Vocabulario: clínica, hospital, resonador magnético, " +
+          "tomógrafo, ecógrafo, mamógrafo, rayos X, Philips, " +
+          "Siemens, GE Healthcare, Canon, LOGIQ P9.",
+      });
+
+      const normalizedTranscript =
+  normalizeMedicalTranscript(transcript);
+
+response.json({
+  success: true,
+  processedLocally: true,
+  transcript: normalizedTranscript,
+});
+
+      console.log("Audio transcrito correctamente.");
+    } catch (error) {
+      console.error("Error transcribiendo audio:", error);
+
+      response.status(500).json({
+        success: false,
+        error: "No fue posible transcribir el audio localmente.",
+        details:
+          error instanceof Error
+            ? error.message
+            : "Error desconocido",
+      });
+    } finally {
+      if (temporaryAudioPath) {
+        await unlink(temporaryAudioPath).catch(() => {});
+      }
+    }
+  },
+);
 
 app.get("/api/dashboard", (_request, response) => {
   try {
@@ -1067,6 +1212,13 @@ async function shutdown() {
   console.log("\nCerrando Cetanex...");
 
   modelReady = false;
+
+  if (transcriptionModelId) {
+  await unloadModel({
+    modelId: transcriptionModelId,
+    clearStorage: false,
+  });
+}
 
   if (modelId) {
     await unloadModel({
