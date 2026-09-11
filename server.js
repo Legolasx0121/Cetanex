@@ -560,6 +560,293 @@ app.post("/api/analyze", async (request, response) => {
   }
 });
 
+app.post("/api/ask", async (request, response) => {
+  try {
+    const question = request.body?.question?.trim();
+
+    if (!question) {
+      return response.status(400).json({
+        success: false,
+        error: "Debes escribir una pregunta.",
+      });
+    }
+
+    if (!modelReady || !modelId) {
+      return response.status(503).json({
+        success: false,
+        error: "El modelo local todavía se está preparando.",
+      });
+    }
+
+    const filterPrompt = `
+/no_think
+
+Convierte la pregunta del usuario en filtros estructurados para consultar
+una base instalada de equipos médicos.
+
+REGLAS:
+- No respondas la pregunta.
+- Devuelve exclusivamente JSON válido.
+- Usa null cuando no exista un filtro.
+- "Siete años o más" significa minimumAge 7 e inclusive true.
+- "Más de siete años" significa minimumAge 7 e inclusive false.
+- Convierte números escritos con palabras a números.
+- No inventes filtros.
+
+FORMATO EXACTO:
+{
+  "country": null,
+  "city": null,
+  "modality": null,
+  "brand": null,
+  "status": null,
+  "minimumAge": null,
+  "minimumAgeInclusive": true,
+  "maximumAge": null,
+  "maximumAgeInclusive": true
+}
+`;
+
+    console.log("\nInterpretando consulta localmente...");
+
+    const run = completion({
+      modelId,
+      history: [
+        {
+          role: "system",
+          content: filterPrompt,
+        },
+        {
+          role: "user",
+          content: question,
+        },
+      ],
+      generationParams: {
+        temp: 0,
+        seed: 42,
+        predict: 350,
+      },
+      stream: true,
+      captureThinking: true,
+    });
+
+    const final = await run.final;
+    const generatedFilters = extractJSON(final.contentText);
+
+    const filters = {
+      country: generatedFilters.country ?? null,
+      city: generatedFilters.city ?? null,
+      modality: generatedFilters.modality ?? null,
+      brand: generatedFilters.brand ?? null,
+      status: generatedFilters.status ?? null,
+      minimumAge:
+        generatedFilters.minimumAge !== null &&
+        generatedFilters.minimumAge !== undefined
+          ? Number(generatedFilters.minimumAge)
+          : null,
+      minimumAgeInclusive:
+        generatedFilters.minimumAgeInclusive !== false,
+      maximumAge:
+        generatedFilters.maximumAge !== null &&
+        generatedFilters.maximumAge !== undefined
+          ? Number(generatedFilters.maximumAge)
+          : null,
+      maximumAgeInclusive:
+        generatedFilters.maximumAgeInclusive !== false,
+    };
+
+    const normalizeSearch = (value) =>
+      String(value ?? "")
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .toLowerCase()
+        .trim();
+
+    const matchesText = (value, filter) => {
+      if (!filter) return true;
+
+      const normalizedValue = normalizeSearch(value);
+      const normalizedFilter = normalizeSearch(filter);
+
+      return (
+        normalizedValue.includes(normalizedFilter) ||
+        normalizedFilter.includes(normalizedValue)
+      );
+    };
+
+    const clients = getClientsOverview();
+
+    const filteredClients = clients
+      .map((client) => {
+        if (!matchesText(client.country, filters.country)) {
+          return null;
+        }
+
+        if (!matchesText(client.city, filters.city)) {
+          return null;
+        }
+
+        const matchingEquipment = client.equipment.filter(
+          (equipment) => {
+            if (
+              !matchesText(
+                equipment.modality,
+                filters.modality,
+              )
+            ) {
+              return false;
+            }
+
+            if (
+              !matchesText(equipment.brand, filters.brand)
+            ) {
+              return false;
+            }
+
+            if (
+              !matchesText(equipment.status, filters.status)
+            ) {
+              return false;
+            }
+
+            if (filters.minimumAge !== null) {
+              if (equipment.ageYears === null) {
+                return false;
+              }
+
+              const passesMinimum =
+                filters.minimumAgeInclusive
+                  ? equipment.ageYears >= filters.minimumAge
+                  : equipment.ageYears > filters.minimumAge;
+
+              if (!passesMinimum) {
+                return false;
+              }
+            }
+
+            if (filters.maximumAge !== null) {
+              if (equipment.ageYears === null) {
+                return false;
+              }
+
+              const passesMaximum =
+                filters.maximumAgeInclusive
+                  ? equipment.ageYears <= filters.maximumAge
+                  : equipment.ageYears < filters.maximumAge;
+
+              if (!passesMaximum) {
+                return false;
+              }
+            }
+
+            return true;
+          },
+        );
+
+        if (matchingEquipment.length === 0) {
+          return null;
+        }
+
+        return {
+          client: client.name,
+          city: client.city,
+          country: client.country,
+          equipment: matchingEquipment.map((equipment) => ({
+            modality: equipment.modality,
+            quantity: equipment.quantity,
+            brand: equipment.brand,
+            model: equipment.model,
+            ageYears: equipment.ageYears,
+            status: equipment.status,
+          })),
+        };
+      })
+      .filter(Boolean);
+
+    const matchedClients = filteredClients.map(
+      (client) => client.client,
+    );
+
+    const keyFindings = filteredClients.flatMap((client) =>
+      client.equipment.map((equipment) => {
+        const brand = equipment.brand
+          ? ` ${equipment.brand}`
+          : "";
+
+        const age =
+          equipment.ageYears !== null
+            ? ` de ${equipment.ageYears} años`
+            : " con antigüedad no disponible";
+
+        return `${client.client}: ${equipment.quantity ?? 1} × ${
+          equipment.modality
+        }${brand}${age}.`;
+      }),
+    );
+
+    const unknownAgeCount = clients.reduce(
+      (total, client) =>
+        total +
+        client.equipment.filter(
+          (equipment) => equipment.ageYears === null,
+        ).length,
+      0,
+    );
+
+    const answer =
+      keyFindings.length > 0
+        ? `Se encontraron ${matchedClients.length} cliente(s) que cumplen la consulta. ${keyFindings.join(
+            " ",
+          )}`
+        : "No se encontraron clientes que cumplan los criterios de la consulta.";
+
+    const dataLimitations = [];
+
+    if (
+      filters.minimumAge !== null ||
+      filters.maximumAge !== null
+    ) {
+      if (unknownAgeCount > 0) {
+        dataLimitations.push(
+          `${unknownAgeCount} registro(s) no pudieron evaluarse porque no tienen antigüedad disponible.`,
+        );
+      }
+    }
+
+    response.json({
+      success: true,
+      processedLocally: true,
+      question,
+      analytics: {
+        answer,
+        matchedClients,
+        keyFindings,
+        dataLimitations,
+        appliedFilters: filters,
+      },
+      performance: {
+        tokensPerSecond:
+          final.stats?.tokensPerSecond ?? null,
+        stopReason: final.stopReason ?? null,
+      },
+    });
+
+    console.log("Consulta analítica completada.");
+  } catch (error) {
+    console.error("Error realizando la consulta:", error);
+
+    response.status(500).json({
+      success: false,
+      error: "No fue posible responder la consulta.",
+      details:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido",
+    });
+  }
+});
+
+
 async function shutdown() {
   console.log("\nCerrando Cetanex...");
 

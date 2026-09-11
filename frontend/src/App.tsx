@@ -26,6 +26,7 @@ import {
 import "./App.css";
 import CaptureModal from "./components/CaptureModal";
 import ClientsModal from "./components/ClientsModal";
+import AnalyticsModal from "./components/AnalyticsModal";
 import { useDashboard } from "./hooks/useDashboard";
 
 
@@ -33,6 +34,8 @@ import { useDashboard } from "./hooks/useDashboard";
 function App() {
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
   const [isClientsOpen, setIsClientsOpen] = useState(false);
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+
   const {
     metrics,
     modalityData,
@@ -75,6 +78,14 @@ function App() {
           >
             <Database size={19} />
             Base instalada
+          </button>
+
+          <button
+            className="nav-item"
+            onClick={() => setIsAnalyticsOpen(true)}
+          >
+            <Sparkles size={19} />
+            Consultar con IA
           </button>
           <button className="nav-item">
             <Map size={19} />
@@ -234,7 +245,12 @@ function App() {
               Hay cinco resonadores con más de siete años y confianza superior
               al 80%. Podrían priorizarse para una revisión comercial.
             </p>
-            <button className="insight-button">Explorar oportunidad</button>
+            <button
+            className="insight-button"
+            onClick={() => setIsAnalyticsOpen(true)}
+          >
+            Explorar oportunidad
+          </button>
 
             <div className="offline-note">
               <ShieldCheck size={17} />
@@ -324,6 +340,11 @@ function App() {
       <ClientsModal
         isOpen={isClientsOpen}
         onClose={() => setIsClientsOpen(false)}
+      />
+      
+      <AnalyticsModal
+        isOpen={isAnalyticsOpen}
+        onClose={() => setIsAnalyticsOpen(false)}
       />
     </div>
   );
