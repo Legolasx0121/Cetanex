@@ -1,4 +1,10 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
+
 import {
   BrainCircuit,
   Camera,
@@ -8,6 +14,7 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  ImageUp,
   X,
 } from "lucide-react";
 import "./CaptureModal.css";
@@ -102,8 +109,30 @@ export default function CaptureModal({
 const [isTranscribing, setIsTranscribing] = useState(false);
 const recorderRef = useRef<WavRecorder | null>(null);
 const imageInputRef = useRef<HTMLInputElement | null>(null);
+const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+const cameraStreamRef = useRef<MediaStream | null>(null);
+const [isCameraOpen, setIsCameraOpen] = useState(false);
 const [isReadingImage, setIsReadingImage] = useState(false);
 const [ocrMessage, setOcrMessage] = useState("");
+
+useEffect(() => {
+  if (
+    isCameraOpen &&
+    cameraVideoRef.current &&
+    cameraStreamRef.current
+  ) {
+    cameraVideoRef.current.srcObject = cameraStreamRef.current;
+    void cameraVideoRef.current.play();
+  }
+}, [isCameraOpen]);
+
+useEffect(() => {
+  return () => {
+    cameraStreamRef.current
+      ?.getTracks()
+      .forEach((track) => track.stop());
+  };
+}, []);
 
   if (!isOpen) return null;
 
@@ -190,11 +219,7 @@ const [ocrMessage, setOcrMessage] = useState("");
   }
 }
 
-async function readPlateImage(event: ChangeEvent<HTMLInputElement>) {
-  const image = event.target.files?.[0];
-
-  if (!image) return;
-
+async function processPlateImage(image: Blob) {
   setIsReadingImage(true);
   setError("");
   setOcrMessage("");
@@ -210,7 +235,17 @@ async function readPlateImage(event: ChangeEvent<HTMLInputElement>) {
       body: image,
     });
 
-    const payload: OcrResponse = await response.json();
+    const responseText = await response.text();
+
+    let payload: OcrResponse;
+
+    try {
+      payload = JSON.parse(responseText) as OcrResponse;
+    } catch {
+      throw new Error(
+        "El backend no devolvió una respuesta OCR válida.",
+      );
+    }
 
     if (!response.ok || !payload.success || !payload.text) {
       throw new Error(
@@ -240,9 +275,122 @@ async function readPlateImage(event: ChangeEvent<HTMLInputElement>) {
     );
   } finally {
     setIsReadingImage(false);
+  }
+}
+
+async function readPlateImage(event: ChangeEvent<HTMLInputElement>) {
+  const image = event.target.files?.[0];
+
+  if (!image) return;
+
+  try {
+    await processPlateImage(image);
+  } finally {
     event.target.value = "";
   }
 }
+
+async function openCamera() {
+  setError("");
+  setOcrMessage("");
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setError("Este navegador no permite acceder a la cámara.");
+    return;
+  }
+
+  try {
+    stopCamera();
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: {
+          ideal: "environment",
+        },
+        width: {
+          ideal: 1920,
+        },
+        height: {
+          ideal: 1080,
+        },
+      },
+      audio: false,
+    });
+
+    cameraStreamRef.current = stream;
+    setIsCameraOpen(true);
+  } catch (cameraError) {
+    setError(
+      cameraError instanceof Error &&
+        cameraError.name === "NotAllowedError"
+        ? "Debes autorizar el acceso a la cámara."
+        : "No fue posible abrir la cámara de este dispositivo.",
+    );
+  }
+}
+
+
+function stopCamera() {
+  cameraStreamRef.current
+    ?.getTracks()
+    .forEach((track) => track.stop());
+
+  cameraStreamRef.current = null;
+
+  if (cameraVideoRef.current) {
+    cameraVideoRef.current.srcObject = null;
+  }
+
+  setIsCameraOpen(false);
+}
+
+async function captureCameraImage() {
+  const video = cameraVideoRef.current;
+
+  if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+    setError("La cámara todavía se está preparando.");
+    return;
+  }
+
+  try {
+    const maximumWidth = 1600;
+    const scale = Math.min(1, maximumWidth / video.videoWidth);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("No fue posible preparar la fotografía.");
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const image = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.9);
+    });
+
+    stopCamera();
+
+    if (!image) {
+      throw new Error("No fue posible capturar la fotografía.");
+    }
+
+    await processPlateImage(image);
+  } catch (captureError) {
+    stopCamera();
+
+    setError(
+      captureError instanceof Error
+        ? captureError.message
+        : "No fue posible capturar la fotografía.",
+    );
+  }
+}
+
+
 
   async function analyzeObservation() {
     if (!observation.trim()) {
@@ -334,6 +482,7 @@ async function readPlateImage(event: ChangeEvent<HTMLInputElement>) {
 }
 
   function closeModal() {
+    stopCamera()
     if (recorderRef.current) {
   const activeRecorder = recorderRef.current;
   recorderRef.current = null;
@@ -454,28 +603,88 @@ setIsTranscribing(false);
   className="plate-image-input"
   type="file"
   accept="image/jpeg,image/png,image/webp,image/bmp"
-  capture="environment"
   onChange={readPlateImage}
 />
 
 <div className="plate-capture-row">
-  <button
-    className="plate-capture-button"
-    type="button"
-    onClick={() => imageInputRef.current?.click()}
-    disabled={isAnalyzing || isReadingImage || isRecording || isTranscribing}
-  >
-    {isReadingImage ? (
-      <LoaderCircle className="spinner" size={17} />
-    ) : (
+  <div className="plate-action-buttons">
+    <button
+      className="plate-capture-button"
+      type="button"
+      onClick={() => void openCamera()}
+      disabled={
+        isAnalyzing ||
+        isReadingImage ||
+        isRecording ||
+        isTranscribing ||
+        isCameraOpen
+      }
+    >
       <Camera size={17} />
-    )}
+      Abrir cámara
+    </button>
 
-    {isReadingImage ? "Leyendo placa localmente..." : "Fotografiar o cargar placa"}
-  </button>
+    <button
+      className="plate-upload-button"
+      type="button"
+      onClick={() => imageInputRef.current?.click()}
+      disabled={
+        isAnalyzing ||
+        isReadingImage ||
+        isRecording ||
+        isTranscribing ||
+        isCameraOpen
+      }
+    >
+      {isReadingImage ? (
+        <LoaderCircle className="spinner" size={17} />
+      ) : (
+        <ImageUp size={17} />
+      )}
+
+      {isReadingImage ? "Leyendo placa..." : "Subir imagen"}
+    </button>
+  </div>
 
   <span>OCR local · La imagen no se guarda</span>
 </div>
+
+{isCameraOpen && (
+  <div className="camera-preview-panel">
+    <div className="camera-preview-frame">
+      <video
+        ref={cameraVideoRef}
+        autoPlay
+        playsInline
+        muted
+      />
+
+      <div className="camera-guide">
+        <span>Coloca la placa dentro del recuadro</span>
+      </div>
+    </div>
+
+    <div className="camera-preview-actions">
+      <button
+        className="camera-cancel-button"
+        type="button"
+        onClick={stopCamera}
+      >
+        <X size={16} />
+        Cancelar
+     </button>
+
+      <button
+        className="camera-shot-button"
+        type="button"
+        onClick={() => void captureCameraImage()}
+      >
+        <Camera size={16} />
+        Tomar fotografía
+      </button>
+    </div>
+  </div>
+)}
 
 {ocrMessage && (
   <div className="ocr-success">
