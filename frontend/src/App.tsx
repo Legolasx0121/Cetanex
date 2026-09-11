@@ -27,6 +27,7 @@ import "./App.css";
 import CaptureModal from "./components/CaptureModal";
 import ClientsModal from "./components/ClientsModal";
 import AnalyticsModal from "./components/AnalyticsModal";
+import VerificationModal from "./components/VerificationModal";
 import { useDashboard } from "./hooks/useDashboard";
 
 
@@ -35,7 +36,8 @@ function App() {
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
   const [isClientsOpen, setIsClientsOpen] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
-
+  const [isVerificationOpen, setIsVerificationOpen] =
+  useState(false);
   const {
     metrics,
     modalityData,
@@ -61,10 +63,13 @@ function App() {
             <LayoutDashboard size={19} />
             Panorama
           </button>
-          <button className="nav-item">
-            <MessageSquareText size={19} />
-            Capturar observación
-          </button>
+          <button
+  className="nav-item"
+  onClick={() => setIsCaptureOpen(true)}
+>
+  <MessageSquareText size={19} />
+  Capturar observación
+</button>
           <button
             className="nav-item"
             onClick={() => setIsClientsOpen(true)}
@@ -79,6 +84,14 @@ function App() {
             <Database size={19} />
             Base instalada
           </button>
+
+          <button
+  className="nav-item"
+  onClick={() => setIsVerificationOpen(true)}
+>
+  <CircleAlert size={19} />
+  Verificaciones
+</button>
 
           <button
             className="nav-item"
@@ -242,9 +255,13 @@ function App() {
             <p className="eyebrow">CETANEX INTELLIGENCE</p>
             <h2>La IA encontró una oportunidad</h2>
             <p>
-              Hay cinco resonadores con más de siete años y confianza superior
-              al 80%. Podrían priorizarse para una revisión comercial.
-            </p>
+  Cetanex identificó{" "}
+  {metrics.renewalOpportunities}{" "}
+  {metrics.renewalOpportunities === 1
+    ? "equipo con siete años o más"
+    : "equipos con siete años o más"}
+  . Puede priorizarse para una revisión comercial y técnica.
+</p>
             <button
             className="insight-button"
             onClick={() => setIsAnalyticsOpen(true)}
@@ -327,7 +344,9 @@ function App() {
               Cetanex preparó preguntas para aumentar su nivel de confianza.
             </span>
           </div>
-          <button>Revisar ahora</button>
+          <button onClick={() => setIsVerificationOpen(true)}>
+  Revisar ahora
+</button>
         </div>
       </main>
       <CaptureModal
@@ -341,11 +360,16 @@ function App() {
         isOpen={isClientsOpen}
         onClose={() => setIsClientsOpen(false)}
       />
-      
+
       <AnalyticsModal
         isOpen={isAnalyticsOpen}
         onClose={() => setIsAnalyticsOpen(false)}
       />
+
+      <VerificationModal
+  isOpen={isVerificationOpen}
+  onClose={() => setIsVerificationOpen(false)}
+/>
     </div>
   );
 }

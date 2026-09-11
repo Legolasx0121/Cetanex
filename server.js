@@ -19,6 +19,7 @@ import {
   getClientsOverview,
   getDashboardSummary,
   getObservations,
+  getVerificationAlerts,
   saveObservation,
 } from "./database.js";
 
@@ -736,6 +737,46 @@ app.get("/api/clients", (_request, response) => {
     response.status(500).json({
       success: false,
       error: "No fue posible consultar los clientes.",
+      details:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido",
+    });
+  }
+});
+
+app.get("/api/verification-alerts", (_request, response) => {
+  try {
+    const alerts = getVerificationAlerts();
+
+    const summary = {
+      total: alerts.length,
+      high: alerts.filter(
+        (alert) => alert.priority === "Alta",
+      ).length,
+      medium: alerts.filter(
+        (alert) => alert.priority === "Media",
+      ).length,
+      low: alerts.filter(
+        (alert) => alert.priority === "Baja",
+      ).length,
+    };
+
+    response.json({
+      success: true,
+      summary,
+      alerts,
+    });
+  } catch (error) {
+    console.error(
+      "Error generando alertas de verificación:",
+      error,
+    );
+
+    response.status(500).json({
+      success: false,
+      error:
+        "No fue posible generar las alertas de verificación.",
       details:
         error instanceof Error
           ? error.message

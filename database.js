@@ -429,3 +429,138 @@ export function getClientsOverview() {
     };
   });
 }
+
+export function getVerificationAlerts() {
+  const rows = database
+    .prepare(`
+      SELECT
+        e.id AS equipmentId,
+        c.id AS clientId,
+        c.name AS clientName,
+        c.city,
+        c.country,
+        e.modality,
+        e.quantity,
+        e.brand,
+        e.model,
+        e.age_years AS ageYears,
+        e.status,
+        o.confidence,
+        o.created_at AS observedAt
+      FROM equipment e
+      JOIN observations o ON o.id = e.observation_id
+      JOIN clients c ON c.id = o.client_id
+      ORDER BY o.created_at ASC
+    `)
+    .all();
+
+  const currentTime = Date.now();
+
+  return rows
+    .map((row) => {
+      const observedTime = Date.parse(row.observedAt);
+
+      const daysSinceObserved = Number.isFinite(observedTime)
+        ? Math.max(
+            0,
+            Math.floor(
+              (currentTime - observedTime) /
+                (1000 * 60 * 60 * 24),
+            ),
+          )
+        : 0;
+
+      const reasons = [];
+      let priorityScore = 0;
+
+      if (row.status === "Desconocido") {
+        reasons.push("La evidencia de la observación es desconocida.");
+        priorityScore += 3;
+      } else if (row.status === "Estimado") {
+        reasons.push("La información contiene valores estimados.");
+        priorityScore += 2;
+      } else if (row.status === "Reportado") {
+        reasons.push("El equipo fue reportado, pero no confirmado.");
+        priorityScore += 1;
+      }
+
+      if (!row.brand) {
+        reasons.push("La marca no ha sido identificada.");
+        priorityScore += 2;
+      }
+
+      if (!row.model) {
+        reasons.push("El modelo no ha sido identificado.");
+        priorityScore += 2;
+      }
+
+      if (row.ageYears === null) {
+        reasons.push("La antigüedad no ha sido verificada.");
+        priorityScore += 2;
+      }
+
+      if (daysSinceObserved >= 180) {
+        reasons.push(
+          `La observación tiene ${daysSinceObserved} días sin actualizarse.`,
+        );
+        priorityScore += 3;
+      } else if (daysSinceObserved >= 90) {
+        reasons.push(
+          `La observación tiene ${daysSinceObserved} días sin actualizarse.`,
+        );
+        priorityScore += 1;
+      }
+
+      if (row.confidence < 60) {
+        reasons.push("La observación tiene confianza baja.");
+        priorityScore += 2;
+      } else if (row.confidence < 80) {
+        reasons.push("La observación requiere revisión adicional.");
+        priorityScore += 1;
+      }
+
+      const priority =
+        priorityScore >= 6
+          ? "Alta"
+          : priorityScore >= 3
+            ? "Media"
+            : "Baja";
+
+      let recommendedAction =
+        "Solicitar una confirmación independiente.";
+
+      if (!row.model) {
+        recommendedAction =
+          "Confirmar el modelo mediante una placa o etiqueta.";
+      } else if (!row.brand) {
+        recommendedAction =
+          "Confirmar la marca del equipo.";
+      } else if (row.ageYears === null) {
+        recommendedAction =
+          "Verificar la antigüedad o fecha de instalación.";
+      } else if (daysSinceObserved >= 90) {
+        recommendedAction =
+          "Programar una nueva verificación de campo.";
+      }
+
+      return {
+        ...row,
+        daysSinceObserved,
+        priority,
+        priorityScore,
+        reasons,
+        recommendedAction,
+      };
+    })
+    .filter((alert) => alert.reasons.length > 0)
+    .sort((first, second) => {
+      if (second.priorityScore !== first.priorityScore) {
+        return second.priorityScore - first.priorityScore;
+      }
+
+      return (
+        second.daysSinceObserved -
+        first.daysSinceObserved
+      );
+    });
+}
