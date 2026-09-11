@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import {
   BrainCircuit,
+  Camera,
   Check,
   LoaderCircle,
   Mic,
@@ -60,6 +61,15 @@ interface AnalysisResponse {
   details?: string;
 }
 
+interface OcrResponse {
+  success: boolean;
+  processedLocally?: boolean;
+  text?: string;
+  blockCount?: number;
+  error?: string;
+  details?: string;
+}
+
 interface TranscriptionResponse {
   success: boolean;
   processedLocally: boolean;
@@ -91,6 +101,9 @@ export default function CaptureModal({
   const [isRecording, setIsRecording] = useState(false);
 const [isTranscribing, setIsTranscribing] = useState(false);
 const recorderRef = useRef<WavRecorder | null>(null);
+const imageInputRef = useRef<HTMLInputElement | null>(null);
+const [isReadingImage, setIsReadingImage] = useState(false);
+const [ocrMessage, setOcrMessage] = useState("");
 
   if (!isOpen) return null;
 
@@ -174,6 +187,60 @@ const recorderRef = useRef<WavRecorder | null>(null);
     setError(
       "No fue posible acceder al micrófono. Revisa el permiso del navegador.",
     );
+  }
+}
+
+async function readPlateImage(event: ChangeEvent<HTMLInputElement>) {
+  const image = event.target.files?.[0];
+
+  if (!image) return;
+
+  setIsReadingImage(true);
+  setError("");
+  setOcrMessage("");
+  setResult(null);
+  setSaved(false);
+
+  try {
+    const response = await fetch("http://localhost:3001/api/ocr", {
+      method: "POST",
+      headers: {
+        "Content-Type": image.type || "image/jpeg",
+      },
+      body: image,
+    });
+
+    const payload: OcrResponse = await response.json();
+
+    if (!response.ok || !payload.success || !payload.text) {
+      throw new Error(
+        payload.details ||
+          payload.error ||
+          "No fue posible reconocer el texto de la placa.",
+      );
+    }
+
+    setObservation((current) =>
+      [
+        current.trim(),
+        `Información confirmada mediante fotografía de placa:\n${payload.text}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    );
+
+    setOcrMessage(
+      `Placa leída localmente: ${payload.blockCount ?? 0} fragmentos identificados.`,
+    );
+  } catch (ocrError) {
+    setError(
+      ocrError instanceof Error
+        ? ocrError.message
+        : "No fue posible procesar la fotografía.",
+    );
+  } finally {
+    setIsReadingImage(false);
+    event.target.value = "";
   }
 }
 
@@ -282,6 +349,7 @@ setIsTranscribing(false);
     setError("");
     setSaved(false);
     setDuplicateMessage("");
+    setOcrMessage("");
     onClose();
   }
 
@@ -381,7 +449,40 @@ setIsTranscribing(false);
   )}
 </button>
             </div>
+            <input
+  ref={imageInputRef}
+  className="plate-image-input"
+  type="file"
+  accept="image/jpeg,image/png,image/webp,image/bmp"
+  capture="environment"
+  onChange={readPlateImage}
+/>
 
+<div className="plate-capture-row">
+  <button
+    className="plate-capture-button"
+    type="button"
+    onClick={() => imageInputRef.current?.click()}
+    disabled={isAnalyzing || isReadingImage || isRecording || isTranscribing}
+  >
+    {isReadingImage ? (
+      <LoaderCircle className="spinner" size={17} />
+    ) : (
+      <Camera size={17} />
+    )}
+
+    {isReadingImage ? "Leyendo placa localmente..." : "Fotografiar o cargar placa"}
+  </button>
+
+  <span>OCR local · La imagen no se guarda</span>
+</div>
+
+{ocrMessage && (
+  <div className="ocr-success">
+    <Check size={16} />
+    {ocrMessage}
+  </div>
+)}
             <div className="input-actions">
               <button
                 className="example-button"

@@ -10,9 +10,11 @@ import {
   loadModel,
   completion,
   transcribe,
+  ocr,
   unloadModel,
   QWEN3_1_7B_INST_Q4,
   WHISPER_LARGE_V3_TURBO,
+  OCR_LATIN,
 } from "@qvac/sdk";
 
 import {
@@ -40,6 +42,9 @@ let modelReady = false;
 
 let transcriptionModelId = null;
 let transcriptionReady = false;
+
+let ocrModelId = null;
+let ocrReady = false;
 
 const extractionPrompt = `
 /no_think
@@ -131,6 +136,13 @@ function normalizeModality(modality) {
   if (!modality) return null;
 
   const normalized = modality.toLowerCase();
+
+  if (
+  normalized === "mri" ||
+  normalized.includes("magnetic resonance")
+) {
+  return "Resonador magnético";
+}
 
   if (normalized.includes("tomograf")) {
     return "Tomógrafo";
@@ -604,6 +616,30 @@ async function initializeQVAC() {
   transcriptionReady = true;
 
   console.log("\nWhisper está listo.");
+  console.log("Cetanex está cargando OCR local...");
+
+ocrModelId = await loadModel({
+  modelSrc: OCR_LATIN,
+  modelType: "ocr",
+  modelConfig: {
+    langList: ["en"],
+    magRatio: 1.5,
+    defaultRotationAngles: [90, 180, 270],
+    contrastRetry: true,
+    lowConfidenceThreshold: 0.45,
+    recognizerBatchSize: 1,
+  },
+  onProgress: (progress) => {
+    const percentage = progress.percentage.toFixed(0);
+
+    process.stdout.write(
+      `\rPreparando OCR: ${percentage}%`,
+    );
+  },
+});
+
+ocrReady = true;
+console.log("\nOCR está listo.");
   console.log("QVAC está listo para texto y voz.");
 }
 
@@ -615,6 +651,7 @@ app.get("/api/health", (_request, response) => {
   transcription: transcriptionReady
     ? "local-ready"
     : "loading",
+  ocr: ocrReady ? "local-ready" : "loading",
   cloudInference: false,
 });
 });
@@ -916,6 +953,95 @@ app.post("/api/observations", (request, response) => {
     });
   }
 });
+
+app.post(
+  "/api/ocr",
+  express.raw({
+    type: ["image/jpeg", "image/png", "image/webp", "image/bmp"],
+    limit: "12mb",
+  }),
+  async (request, response) => {
+    let temporaryImagePath = null;
+
+    try {
+      if (!ocrReady || !ocrModelId) {
+        return response.status(503).json({
+          success: false,
+          error: "El modelo OCR local todavía se está preparando.",
+        });
+      }
+
+      if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+        return response.status(400).json({
+          success: false,
+          error: "Debes enviar una imagen válida.",
+        });
+      }
+
+      const contentType =
+        request.headers["content-type"]?.split(";")[0] ?? "";
+
+      const extensions = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/bmp": ".bmp",
+      };
+
+      const extension = extensions[contentType] ?? ".jpg";
+
+      temporaryImagePath = join(
+        tmpdir(),
+        `cetanex-plate-${randomUUID()}${extension}`,
+      );
+
+      await writeFile(temporaryImagePath, request.body);
+
+      console.log("\nLeyendo placa localmente con OCR...");
+
+      const run = ocr({
+        modelId: ocrModelId,
+        image: temporaryImagePath,
+      });
+
+      const blocks = await run.blocks;
+
+      const recognizedBlocks = (blocks ?? [])
+        .map((block) => block.text?.trim())
+        .filter(Boolean);
+
+      const extractedText = recognizedBlocks.join("\n");
+
+      if (!extractedText) {
+        return response.status(422).json({
+          success: false,
+          error: "No se pudo identificar texto legible en la imagen.",
+        });
+      }
+
+      response.json({
+        success: true,
+        processedLocally: true,
+        text: extractedText,
+        blockCount: recognizedBlocks.length,
+      });
+
+      console.log("Placa procesada correctamente con OCR local.");
+    } catch (error) {
+      console.error("Error procesando la imagen con OCR:", error);
+
+      response.status(500).json({
+        success: false,
+        error: "No fue posible leer la placa.",
+        details: error instanceof Error ? error.message : "Error desconocido",
+      });
+    } finally {
+      if (temporaryImagePath) {
+        await unlink(temporaryImagePath).catch(() => {});
+      }
+    }
+  },
+);
 
 app.post("/api/analyze", async (request, response) => {
   try {
@@ -1307,13 +1433,26 @@ async function shutdown() {
   console.log("\nCerrando Cetanex...");
 
   modelReady = false;
+  transcriptionReady = false;
+  ocrReady = false;
+
+  if (ocrModelId) {
+    await unloadModel({
+      modelId: ocrModelId,
+      clearStorage: false,
+    });
+
+    ocrModelId = null;
+  }
 
   if (transcriptionModelId) {
-  await unloadModel({
-    modelId: transcriptionModelId,
-    clearStorage: false,
-  });
-}
+    await unloadModel({
+      modelId: transcriptionModelId,
+      clearStorage: false,
+    });
+
+    transcriptionModelId = null;
+  }
 
   if (modelId) {
     await unloadModel({
