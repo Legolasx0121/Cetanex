@@ -39,6 +39,9 @@ en hospitales. Convierte la observación del usuario en JSON válido.
 REGLAS OBLIGATORIAS:
 - No inventes ni deduzcas datos que el usuario no proporcionó.
 - Un atributo solamente pertenece al equipo mencionado junto a él.
+- Si varios equipos de la misma modalidad tienen atributos diferentes, sepáralos en elementos distintos.
+- Si se mencionan dos equipos pero solo uno tiene antigüedad, crea uno con quantity 1 y esa antigüedad, y otro con quantity 1 y ageYears null.
+- Las expresiones estimadas como "parece tener ocho años" afectan únicamente al equipo correspondiente y su estado debe ser "Estimado".
 - Nunca copies marca, modelo o antigüedad de un equipo hacia otro.
 - Usa null para cualquier dato ausente.
 - Nunca escribas "Desconocido" dentro de un campo de datos.
@@ -147,6 +150,170 @@ function normalizeModality(modality) {
   return modality.trim();
 }
 
+const ageWords = {
+  uno: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  once: 11,
+  doce: 12,
+  trece: 13,
+  catorce: 14,
+  quince: 15,
+  veinte: 20,
+};
+
+function splitPartiallyDescribedEquipment(data, observation) {
+  const match = observation.match(
+    /\buno\s+de\s+(?:los|las)\s+([a-záéíóúñü]+)[^.]{0,100}?(?:parece(?:\s+tener)?|tiene)\s+(?:unos?\s+|aproximadamente\s+)?(\d+|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte)\s+años?\b/iu,
+  );
+
+  if (!match || !Array.isArray(data.equipment)) {
+    return data;
+  }
+
+  const mentionedModality = match[1]
+    .toLowerCase()
+    .replace(/(?:es|s)$/u, "");
+
+  const ageToken = match[2].toLowerCase();
+  const ageYears = /^\d+$/.test(ageToken)
+    ? Number(ageToken)
+    : ageWords[ageToken];
+
+  const equipmentIndex = data.equipment.findIndex((equipment) => {
+    const modality = String(equipment.modality ?? "").toLowerCase();
+
+    return (
+      Number(equipment.quantity) > 1 &&
+      modality.includes(mentionedModality)
+    );
+  });
+
+  if (equipmentIndex === -1 || !ageYears) {
+    return data;
+  }
+
+  const original = data.equipment[equipmentIndex];
+  const totalQuantity = Number(original.quantity);
+
+  data.equipment.splice(
+    equipmentIndex,
+    1,
+    {
+      ...original,
+      quantity: 1,
+      ageYears,
+      status: "Estimado",
+    },
+    {
+      ...original,
+      quantity: totalQuantity - 1,
+      ageYears: null,
+      status: "Reportado",
+    },
+  );
+
+  return data;
+}
+
+function rebuildObservationMetadata(data) {
+  const missingFields = [];
+
+  if (!data.client?.name) missingFields.push("Nombre del cliente");
+  if (!data.client?.city) missingFields.push("Ciudad");
+  if (!data.client?.country) missingFields.push("País");
+
+  data.equipment.forEach((equipment, index) => {
+    const equipmentName =
+      equipment.modality || `Equipo ${index + 1}`;
+
+    if (!equipment.modality) {
+      missingFields.push(`Modalidad de ${equipmentName}`);
+    }
+
+    if (!equipment.quantity) {
+      missingFields.push(`Cantidad de ${equipmentName}`);
+    }
+
+    if (!equipment.brand) {
+      missingFields.push(`Marca de ${equipmentName}`);
+    }
+
+    if (!equipment.model) {
+      missingFields.push(`Modelo de ${equipmentName}`);
+    }
+
+    if (equipment.ageYears === null || equipment.ageYears === undefined) {
+      missingFields.push(`Antigüedad de ${equipmentName}`);
+    }
+  });
+
+  data.missingFields = [...new Set(missingFields)];
+
+  const renewalCandidate = data.equipment.find(
+    (equipment) =>
+      Number(equipment.ageYears) >= 7 &&
+      !equipment.model,
+  );
+
+  const equipmentWithoutBrand = data.equipment.find(
+    (equipment) => !equipment.brand,
+  );
+
+  const equipmentWithoutAge = data.equipment.find(
+    (equipment) =>
+      equipment.ageYears === null ||
+      equipment.ageYears === undefined,
+  );
+
+  if (renewalCandidate) {
+    data.followUpQuestion =
+      `¿Cuál es el modelo exacto del ${renewalCandidate.modality} ` +
+      `estimado en ${renewalCandidate.ageYears} años?`;
+  } else if (equipmentWithoutBrand) {
+    data.followUpQuestion =
+      `¿Cuál es la marca del ${equipmentWithoutBrand.modality}?`;
+  } else if (equipmentWithoutAge) {
+    data.followUpQuestion =
+      `¿Cuál es la antigüedad aproximada del ${equipmentWithoutAge.modality}?`;
+  } else {
+    data.followUpQuestion = null;
+  }
+
+  if (typeof data.summary !== "string" || !data.summary.trim()) {
+    const clientName = data.client?.name || "el cliente";
+
+    const equipmentSummary = data.equipment
+      .map((equipment) => {
+        const quantity = equipment.quantity ?? 1;
+        const modality = equipment.modality || "equipo";
+        const brand = equipment.brand
+          ? ` ${equipment.brand}`
+          : "";
+        const age =
+          equipment.ageYears !== null &&
+          equipment.ageYears !== undefined
+            ? ` de ${equipment.ageYears} años`
+            : "";
+
+        return `${quantity} × ${modality}${brand}${age}`;
+      })
+      .join(", ");
+
+    data.summary =
+      `En ${clientName} se registraron: ${equipmentSummary}.`;
+  }
+
+  return data;
+}
+
 function validateAndEnrich(data, observation) {
   if (!data.client) {
     data.client = {
@@ -172,11 +339,15 @@ function validateAndEnrich(data, observation) {
   }
 
   data.equipment = (data.equipment ?? []).map((equipment) => ({
-    ...equipment,
-    modality: normalizeModality(equipment.modality),
-  }));
+  ...equipment,
+  modality: normalizeModality(equipment.modality),
+}));
 
-  return data;
+splitPartiallyDescribedEquipment(data, observation);
+rebuildObservationMetadata(data);
+
+return data;
+
 }
 
 function calculateConfidence(data) {
