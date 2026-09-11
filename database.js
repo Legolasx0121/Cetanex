@@ -119,7 +119,71 @@ const insertEquipmentStatement = database.prepare(`
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
+function normalizeSignatureValue(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function createObservationSignature(client, equipment) {
+  const clientSignature = [
+    client?.name,
+    client?.city,
+    client?.country,
+  ]
+    .map(normalizeSignatureValue)
+    .join("|");
+
+  const equipmentSignature = [...(equipment ?? [])]
+    .map((item) =>
+      [
+        item.modality,
+        item.quantity ?? 1,
+        item.brand,
+        item.model,
+        item.ageYears,
+        item.status,
+      ]
+        .map(normalizeSignatureValue)
+        .join("|"),
+    )
+    .sort()
+    .join("::");
+
+  return `${clientSignature}::${equipmentSignature}`;
+}
+
 export function saveObservation(rawText, data) {
+    const incomingSignature = createObservationSignature(
+    data.client,
+    data.equipment,
+  );
+
+  const duplicate = getObservations().find((observation) => {
+    const existingSignature = createObservationSignature(
+      {
+        name: observation.clientName,
+        city: observation.city,
+        country: observation.country,
+      },
+      observation.equipment,
+    );
+
+    return existingSignature === incomingSignature;
+  });
+
+  if (duplicate) {
+    return {
+      duplicate: true,
+      existingObservationId: duplicate.id,
+      createdAt: duplicate.createdAt,
+    };
+  }
+  
+  
   const createdAt = new Date().toISOString();
   const clientName = data.client?.name || "Cliente no identificado";
   const city = data.client?.city || "";

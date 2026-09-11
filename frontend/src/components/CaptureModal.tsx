@@ -69,6 +69,7 @@ export default function CaptureModal({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [duplicateMessage, setDuplicateMessage] = useState("");
 
   if (!isOpen) return null;
 
@@ -82,6 +83,7 @@ export default function CaptureModal({
     setError("");
     setResult(null);
     setSaved(false);
+    setDuplicateMessage("");
 
     try {
       const response = await fetch("http://localhost:3001/api/analyze", {
@@ -145,6 +147,11 @@ export default function CaptureModal({
       );
     }
 
+    if (payload.duplicate) {
+      setDuplicateMessage(payload.message);
+      return;
+    }
+
     setSaved(true);
   } catch (saveError) {
     setError(
@@ -161,6 +168,7 @@ export default function CaptureModal({
     setPerformance(null);
     setError("");
     setSaved(false);
+    setDuplicateMessage("");
     onClose();
   }
 
@@ -369,16 +377,28 @@ export default function CaptureModal({
                   </div>
                 )}
 
+                {duplicateMessage && (
+                  <div className="duplicate-warning">
+                    <strong>Posible duplicado detectado</strong>
+                    <p>{duplicateMessage}</p>
+                    <span>No se creó un registro adicional.</span>
+                  </div>
+                )}
+
                 <button
-                  className={`save-observation-button ${saved ? "saved" : ""}`}
+                  className={`save-observation-button ${
+                    saved || duplicateMessage ? "saved" : ""
+                  }`}
                   type="button"
                   onClick={saveObservation}
-                  disabled={saved}
+                  disabled={saved || Boolean(duplicateMessage)}
                 >
                   <Check size={18} />
-                  {saved
-                    ? "Observación guardada"
-                    : "Guardar en la base instalada"}
+                  {duplicateMessage
+                    ? "Duplicado no guardado"
+                    : saved
+                      ? "Observación guardada"
+                      : "Guardar en la base instalada"}
                 </button>
               </div>
             )}

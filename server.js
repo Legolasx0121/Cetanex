@@ -1,19 +1,20 @@
 import express from "express";
 import cors from "cors";
 import { jsonrepair } from "jsonrepair";
+
 import {
   loadModel,
   completion,
   unloadModel,
   QWEN3_1_7B_INST_Q4,
 } from "@qvac/sdk";
+
 import {
   getClientsOverview,
   getDashboardSummary,
   getObservations,
   saveObservation,
 } from "./database.js";
-
 
 const app = express();
 const PORT = 3001;
@@ -46,13 +47,14 @@ REGLAS OBLIGATORIAS:
 - "Estimado": contiene expresiones como "parece", "unos" o "aproximadamente".
 - "Reportado": el colaborador afirma directamente que observó el equipo.
 - "Confirmado": existe placa, etiqueta, documento o verificación explícita.
-- "Desconocido": ni siquiera puede determinarse cómo se obtuvo la información.
+- "Desconocido": no puede determinarse cómo se obtuvo la información.
 - El estado describe la evidencia del equipo, aunque otros campos estén vacíos.
 - Incluye todos los equipos mencionados.
-- Calcula confianza entre 0 y 100 según completitud y precisión.
+- Calcula una confianza entre 0 y 100 según completitud y precisión.
 - Enumera los campos importantes que faltan.
 - Formula una sola pregunta sobre el dato faltante más valioso.
-- Devuelve exclusivamente JSON. No expliques tu respuesta.
+- Devuelve exclusivamente JSON.
+- No agregues Markdown ni explicaciones.
 
 FORMATO EXACTO:
 {
@@ -124,11 +126,17 @@ function normalizeModality(modality) {
     return "Resonador magnético";
   }
 
-  if (normalized.includes("ecograf") || normalized.includes("ultrason")) {
+  if (
+    normalized.includes("ecograf") ||
+    normalized.includes("ultrason")
+  ) {
     return "Ecógrafo";
   }
 
-  if (normalized.includes("rayos x") || normalized.includes("radiograf")) {
+  if (
+    normalized.includes("rayos x") ||
+    normalized.includes("radiograf")
+  ) {
     return "Rayos X";
   }
 
@@ -183,11 +191,14 @@ async function initializeQVAC() {
     },
     onProgress: (progress) => {
       const percentage = progress.percentage.toFixed(0);
-      process.stdout.write(`\rPreparando modelo: ${percentage}%`);
+      process.stdout.write(
+        `\rPreparando modelo: ${percentage}%`,
+      );
     },
   });
 
   modelReady = true;
+
   console.log("\nQVAC está listo.");
 }
 
@@ -214,7 +225,10 @@ app.get("/api/dashboard", (_request, response) => {
     response.status(500).json({
       success: false,
       error: "No fue posible generar el dashboard.",
-      details: error instanceof Error ? error.message : "Error desconocido",
+      details:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido",
     });
   }
 });
@@ -234,7 +248,10 @@ app.get("/api/clients", (_request, response) => {
     response.status(500).json({
       success: false,
       error: "No fue posible consultar los clientes.",
-      details: error instanceof Error ? error.message : "Error desconocido",
+      details:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido",
     });
   }
 });
@@ -249,11 +266,19 @@ app.get("/api/observations", (_request, response) => {
       observations,
     });
   } catch (error) {
-    console.error("Error consultando observaciones:", error);
+    console.error(
+      "Error consultando observaciones:",
+      error,
+    );
 
     response.status(500).json({
       success: false,
-      error: "No fue posible consultar la base instalada.",
+      error:
+        "No fue posible consultar la base instalada.",
+      details:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido",
     });
   }
 });
@@ -265,45 +290,73 @@ app.post("/api/observations", (request, response) => {
     if (!rawObservation?.trim() || !data) {
       return response.status(400).json({
         success: false,
-        error: "La observación y los datos estructurados son obligatorios.",
+        error:
+          "La observación y los datos estructurados son obligatorios.",
       });
     }
 
-    const savedRecord = saveObservation(rawObservation, data);
+    const savedRecord = saveObservation(
+      rawObservation,
+      data,
+    );
 
-    response.status(201).json({
+    if (savedRecord.duplicate) {
+      return response.status(200).json({
+        success: true,
+        duplicate: true,
+        message:
+          "Esta observación ya existe en la base instalada.",
+        record: savedRecord,
+      });
+    }
+
+    return response.status(201).json({
       success: true,
+      duplicate: false,
       message: "Observación guardada localmente.",
       record: savedRecord,
     });
   } catch (error) {
-    console.error("Error guardando observación:", error);
+    console.error(
+      "Error guardando observación:",
+      error,
+    );
 
-    response.status(500).json({
+    return response.status(500).json({
       success: false,
-      error: "No fue posible guardar la observación.",
-      details: error instanceof Error ? error.message : "Error desconocido",
+      error:
+        "No fue posible guardar la observación.",
+      details:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido",
     });
   }
 });
 
 app.post("/api/analyze", async (request, response) => {
   try {
-    const observation = request.body?.observation?.trim();
+    const observation =
+      request.body?.observation?.trim();
 
     if (!observation) {
       return response.status(400).json({
+        success: false,
         error: "Debes escribir una observación.",
       });
     }
 
     if (!modelReady || !modelId) {
       return response.status(503).json({
-        error: "El modelo local todavía se está preparando.",
+        success: false,
+        error:
+          "El modelo local todavía se está preparando.",
       });
     }
 
-    console.log("\nAnalizando observación localmente...");
+    console.log(
+      "\nAnalizando observación localmente...",
+    );
 
     const run = completion({
       modelId,
@@ -327,30 +380,44 @@ app.post("/api/analyze", async (request, response) => {
     });
 
     const final = await run.final;
-    const extractedData = extractJSON(final.contentText);
-    const structuredObservation = validateAndEnrich(
+    const extractedData = extractJSON(
+      final.contentText,
+    );
+
+    const structuredObservation =
+      validateAndEnrich(
         extractedData,
         observation,
-    );
+      );
 
     response.json({
       success: true,
       processedLocally: true,
       data: structuredObservation,
       performance: {
-        tokensPerSecond: final.stats?.tokensPerSecond ?? null,
+        tokensPerSecond:
+          final.stats?.tokensPerSecond ?? null,
         stopReason: final.stopReason ?? null,
       },
     });
 
-    console.log("Observación procesada correctamente.");
+    console.log(
+      "Observación procesada correctamente.",
+    );
   } catch (error) {
-    console.error("Error procesando la observación:", error);
+    console.error(
+      "Error procesando la observación:",
+      error,
+    );
 
     response.status(500).json({
       success: false,
-      error: "No fue posible estructurar la observación.",
-      details: error instanceof Error ? error.message : "Error desconocido",
+      error:
+        "No fue posible estructurar la observación.",
+      details:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido",
     });
   }
 });
@@ -358,11 +425,15 @@ app.post("/api/analyze", async (request, response) => {
 async function shutdown() {
   console.log("\nCerrando Cetanex...");
 
+  modelReady = false;
+
   if (modelId) {
     await unloadModel({
       modelId,
       clearStorage: false,
     });
+
+    modelId = null;
   }
 
   process.exit(0);
@@ -375,10 +446,18 @@ try {
   await initializeQVAC();
 
   app.listen(PORT, () => {
-    console.log(`Servidor local: http://localhost:${PORT}`);
-    console.log(`Estado: http://localhost:${PORT}/api/health`);
+    console.log(
+      `Servidor local: http://localhost:${PORT}`,
+    );
+    console.log(
+      `Estado: http://localhost:${PORT}/api/health`,
+    );
   });
 } catch (error) {
-  console.error("No se pudo iniciar Cetanex:", error);
+  console.error(
+    "No se pudo iniciar Cetanex:",
+    error,
+  );
+
   process.exit(1);
 }

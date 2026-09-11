@@ -483,6 +483,36 @@
   text-align: center;
 }
 
+.duplicate-warning {
+  margin-top: 12px;
+  padding: 13px;
+  border: 1px solid #fedf89;
+  border-radius: 11px;
+  color: #b54708;
+  background: #fffaeb;
+}
+
+.duplicate-warning strong,
+.duplicate-warning span {
+  display: block;
+}
+
+.duplicate-warning strong {
+  color: #93370d;
+  font-size: 10px;
+}
+
+.duplicate-warning p {
+  margin: 5px 0;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.duplicate-warning span {
+  color: #dc6803;
+  font-size: 8px;
+}
+
 .save-observation-button {
   display: flex;
   align-items: center;
