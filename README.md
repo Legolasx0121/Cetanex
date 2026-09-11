@@ -137,7 +137,7 @@ Cetanex/
 Clonar el repositorio e instalar el backend:
 
 ```bash
-git clone <URL-DEL-REPOSITORIO>
+git clone https://github.com/Legolasx0121/Cetanex.git
 cd Cetanex
 npm install
 ```
